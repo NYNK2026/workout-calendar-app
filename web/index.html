@@ -69,10 +69,17 @@
       リンクなど)がタップ判定を受け付けなくなる。この不具合はiOS PWA(ホーム画面追加後の
       スタンドアロン起動)でのみ発生し、Safari/Chromeのブラウザタブ表示やAndroidでは発生しない。
 
-      対策: passiveなtouchstartリスナーを登録して不要なジェスチャー競合を減らし、
-      フォーカスアウト・画面表示復帰・リサイズ等のタイミングで
-      document/visualViewportのスクロール位置を強制的にリセットすることで、
-      iOSが誤って保持しているビューポートのズレを解消する。
+      また、起動直後は逆に「タップ判定位置が実際の表示位置より上にズレる」という
+      症状で現れることも確認している。これは合成のresizeイベント発火だけでは直らず、
+      「本物のフォーカス→ブラーのサイクル」(=キーボード表示/非表示に伴うWebKit内部の
+      ビューポート再計算)を一度経由することで解消される(記録シート内のTextFieldを
+      操作すると直っていたのはこのため)。
+
+      対策:
+      1. passiveなtouchstartリスナーを登録して不要なジェスチャー競合を減らす
+      2. 画面外に見えないダミーのinput要素を用意し、起動直後・最初のタップ操作時に
+         実際にfocus()→blur()させることで、本物のフォーカス/ブラーサイクルを
+         人工的に発生させ、WebKit側のビューポート計算を正しい状態にリセットする
     */
     (function () {
       const isIos =
@@ -94,20 +101,6 @@
         });
       };
 
-      // フォーカスアウト後、iOSが「見えないキーボード」状態を握り続けている場合に
-      // activeElementのフォーカスを明示的に外し、ビューポートのズレをリセットする
-      const forceBlurAndReset = () => {
-        const active = document.activeElement;
-        if (
-          active &&
-          active !== document.body &&
-          typeof active.blur === 'function'
-        ) {
-          active.blur();
-        }
-        resetViewportScroll();
-      };
-
       const installTouchWorkaround = () => {
         const noop = () => {};
         window.addEventListener('touchstart', noop, {
@@ -124,52 +117,105 @@
         });
       };
 
-      // 起動直後、Flutterエンジンがまだセーフエリア/ビューポートの
-      // 確定前のサイズを読み取ってしまい、タップ判定位置が実際の表示位置
-      // より上にズレたまま固定されてしまう現象への対策。
-      // 「resize」イベントを強制的に発火させることで、Flutterのウェブ
-      // エンジンに画面サイズを再計算させ、ズレを解消する。
-      // (モーダルシートを開いて閉じると直る、という現象はこの再計算が
-      //  副作用として発生していたことによるものと考えられる)
-      const forceEngineResize = () => {
-        resetViewportScroll();
-        try {
-          window.dispatchEvent(new Event('resize'));
-        } catch (e) {
-          /* no-op */
+      // 画面外に配置する、見た目に影響しないダミーのinput要素を作成する。
+      // これに実際にfocus/blurさせることで、iOSの「本物の」キーボード
+      // 表示/非表示サイクルを経由させ、ビューポート計算のズレを解消する。
+      let dummyInput = null;
+      const getDummyInput = () => {
+        if (dummyInput) return dummyInput;
+        dummyInput = document.createElement('input');
+        dummyInput.setAttribute('type', 'text');
+        dummyInput.setAttribute('aria-hidden', 'true');
+        dummyInput.setAttribute('tabindex', '-1');
+        dummyInput.style.position = 'fixed';
+        dummyInput.style.top = '-1000px';
+        dummyInput.style.left = '0';
+        dummyInput.style.width = '1px';
+        dummyInput.style.height = '1px';
+        dummyInput.style.opacity = '0';
+        dummyInput.style.border = 'none';
+        dummyInput.style.padding = '0';
+        // iOSが自動ズームしないよう16px以上を指定
+        dummyInput.style.fontSize = '16px';
+        dummyInput.style.pointerEvents = 'none';
+        document.body.appendChild(dummyInput);
+        return dummyInput;
+      };
+
+      // フォーカスアウト後、iOSが「見えないキーボード」状態を握り続けている場合に
+      // activeElementのフォーカスを明示的に外し、ビューポートのズレをリセットする
+      const forceBlurAndReset = () => {
+        const active = document.activeElement;
+        if (
+          active &&
+          active !== document.body &&
+          typeof active.blur === 'function'
+        ) {
+          active.blur();
         }
-        if (window.visualViewport) {
-          try {
-            window.visualViewport.dispatchEvent(new Event('resize'));
-          } catch (e) {
-            /* no-op */
-          }
+        resetViewportScroll();
+      };
+
+      let cycleInProgress = false;
+      // 本物のフォーカス→ブラーサイクルを人工的に発生させ、WebKitの
+      // ビューポート計算を正しい状態に強制リセットする
+      const runFocusBlurCycle = (callback) => {
+        if (cycleInProgress) {
+          if (callback) callback();
+          return;
+        }
+        cycleInProgress = true;
+        try {
+          const input = getDummyInput();
+          input.focus({ preventScroll: true });
+          window.setTimeout(() => {
+            input.blur();
+            resetViewportScroll();
+            cycleInProgress = false;
+            if (callback) callback();
+          }, 60);
+        } catch (e) {
+          cycleInProgress = false;
+          if (callback) callback();
         }
       };
 
       installTouchWorkaround();
       resetViewportScroll();
 
-      // 起動直後は複数回にわたって強制的にリサイズ処理をかけ、
+      // 起動直後、複数のタイミングでフォーカス/ブラーサイクルを実行し、
       // Flutter側のレイアウト確定タイミングのズレを吸収する
-      [0, 150, 350, 600, 1000, 1600, 2400].forEach((delay) => {
-        window.setTimeout(forceEngineResize, delay);
+      [50, 300, 700, 1200, 2000].forEach((delay) => {
+        window.setTimeout(() => runFocusBlurCycle(), delay);
       });
 
       // Flutter Webが初回フレームを描画したタイミングでも実行する
       window.addEventListener('flutter-first-frame', () => {
-        forceEngineResize();
-        window.setTimeout(forceEngineResize, 300);
-        window.setTimeout(forceEngineResize, 800);
+        runFocusBlurCycle();
+        window.setTimeout(() => runFocusBlurCycle(), 400);
       });
 
-      window.addEventListener('pageshow', forceEngineResize);
+      // ユーザーが最初に画面をタップした瞬間にも一度だけ実行する
+      // (実際のユーザー操作を伴うことで、iOS側の制約下でも確実に
+      //  フォーカスサイクルが機能するようにするフォールバック)
+      let firstTouchHandled = false;
+      document.addEventListener(
+        'touchstart',
+        () => {
+          if (firstTouchHandled) return;
+          firstTouchHandled = true;
+          runFocusBlurCycle();
+        },
+        { capture: true, passive: true }
+      );
+
+      window.addEventListener('pageshow', () => runFocusBlurCycle());
       window.addEventListener('resize', resetViewportScroll);
-      window.addEventListener('orientationchange', forceEngineResize);
+      window.addEventListener('orientationchange', () => runFocusBlurCycle());
       window.addEventListener('focusout', forceBlurAndReset, true);
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden) {
-          forceEngineResize();
+          runFocusBlurCycle();
         }
       });
 
