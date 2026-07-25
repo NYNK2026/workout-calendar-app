@@ -58,70 +58,6 @@
     }
   </style>
 
-  <style>
-    /*
-      Flutterの描画領域(タップ判定がズレる可能性がある領域)の外側、
-      プレーンなHTML/CSSレイヤーとして常駐する「位置調整」ボタン。
-      Flutterのcanvasに依存しないため、Flutter側のタップ判定ズレの
-      影響を受けず、常に確実にタップできる。
-    */
-    #ios-pwa-fix-button {
-      position: fixed;
-      /* 右下はFlutter側の「+」FABと重なるため、左下に配置する */
-      left: 14px;
-      bottom: calc(14px + env(safe-area-inset-bottom, 0px));
-      z-index: 2147483647;
-      display: none;
-      align-items: center;
-      gap: 6px;
-      padding: 10px 16px;
-      border: none;
-      border-radius: 999px;
-      background: #4ECDC4;
-      color: #ffffff;
-      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
-      font-size: 13px;
-      font-weight: 600;
-      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
-      -webkit-tap-highlight-color: transparent;
-      touch-action: manipulation;
-    }
-    #ios-pwa-fix-button:active {
-      background: #3fb6ae;
-    }
-    #ios-pwa-fix-toast {
-      position: fixed;
-      left: 50%;
-      bottom: calc(74px + env(safe-area-inset-bottom, 0px));
-      transform: translateX(-50%);
-      z-index: 2147483647;
-      display: none;
-      padding: 8px 16px;
-      border-radius: 999px;
-      background: rgba(30, 30, 30, 0.85);
-      color: #ffffff;
-      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
-      font-size: 12px;
-      white-space: nowrap;
-    }
-    #ios-pwa-fix-input {
-      position: fixed;
-      /* 画面内(表示範囲内)に置く。iOSは完全に画面外や極端に小さい要素
-         へのfocus()ではキーボードを表示しないことがあるため、実際に
-         視認できる程度のサイズ・位置に配置する */
-      left: 50%;
-      bottom: 70px;
-      transform: translateX(-50%);
-      width: 10px;
-      height: 36px;
-      opacity: 0.01;
-      border: none;
-      padding: 0;
-      font-size: 16px;
-      z-index: 2147483646;
-    }
-  </style>
-
   <script>
     /*
       iOS「ホーム画面に追加」(スタンドアロンPWA)モード限定の既知のFlutter/WebKit不具合対策。
@@ -129,21 +65,12 @@
             https://github.com/flutter/flutter/issues/111896
 
       現象: 起動直後、Flutter Web側のタップ判定位置が実際の表示位置より
-      上にズレてしまう。これは「見えないダミー要素へのfocus()」や
-      「合成のresizeイベント」、「TextFieldを含むが実際にはフォーカス
-      されていないシートの表示」では解消できないことを実機検証で確認済み。
+      上にズレることがある。
 
-      実際に解消するのは、ユーザーが「実在する入力欄に本物のタップで
-      フォーカス→ソフトキーボードを実際に開閉する」という操作のみ
-      (記録シートの数値欄をタップしてから✓で閉じると直る)。
-
-      対策: Flutterのcanvas(タップ判定がズレる領域)の外側、プレーンな
-      HTML要素として「位置調整」ボタンを常駐させる。このボタンは
-      Flutterの影響を受けないため常に正しい位置でタップできる。
-      ボタンタップ(=本物のユーザージェスチャー)をトリガーとして、
-      画面内に実在する小さな入力欄に同期的にfocus()し、実際にソフト
-      キーボードを開かせ、その後blur()して閉じることで、ユーザーが
-      手動操作で発見した「効果のある操作」を確実に再現する。
+      対策: ページ読み込み時・表示復帰時にスクロール位置を強制的に
+      (0, 0)へリセットし、タッチイベントを一度フックしておくことで
+      iOS/WebKit側のビューポート計算のズレを軽減する。画面上に見える
+      UIは表示しない(バックグラウンドで自動的に動作する)。
     */
     (function () {
       const isIos =
@@ -223,128 +150,8 @@
         });
       };
 
-      let fixInput = null;
-      const getFixInput = () => {
-        if (fixInput) return fixInput;
-        fixInput = document.createElement('input');
-        fixInput.id = 'ios-pwa-fix-input';
-        fixInput.setAttribute('type', 'text');
-        fixInput.setAttribute('inputmode', 'numeric');
-        fixInput.setAttribute('aria-hidden', 'true');
-        fixInput.setAttribute('autocomplete', 'off');
-        fixInput.setAttribute('autocorrect', 'off');
-        fixInput.setAttribute('autocapitalize', 'off');
-        fixInput.setAttribute('spellcheck', 'false');
-        document.body.appendChild(fixInput);
-        return fixInput;
-      };
-
-      let toastEl = null;
-      const getToast = () => {
-        if (toastEl) return toastEl;
-        toastEl = document.createElement('div');
-        toastEl.id = 'ios-pwa-fix-toast';
-        toastEl.textContent = '表示位置を調整しました';
-        document.body.appendChild(toastEl);
-        return toastEl;
-      };
-      const showToast = () => {
-        const toast = getToast();
-        toast.style.display = 'block';
-        window.setTimeout(() => {
-          toast.style.display = 'none';
-        }, 1800);
-      };
-
-      let fixInProgress = false;
-      // 本物のユーザージェスチャー(ボタンタップ)を起点に、実在する
-      // 入力欄へ同期的にfocus()してソフトキーボードを実際に開かせ、
-      // 少し待ってからblur()で閉じる。これにより、iOS/WebKit側の
-      // ビューポート計算が正しくリセットされ、タップ判定ズレが解消する。
-      const runRealKeyboardCycle = (onDone) => {
-        if (fixInProgress) {
-          if (onDone) onDone();
-          return;
-        }
-        fixInProgress = true;
-        const input = getFixInput();
-        try {
-          input.value = '';
-          // ボタンのclickハンドラ内(=本物のユーザージェスチャー内)で
-          // 同期的に呼ぶことで、iOSがソフトキーボードを実際に表示する
-          input.focus({ preventScroll: true });
-        } catch (e) {
-          /* no-op */
-        }
-
-        const finish = () => {
-          try {
-            input.blur();
-          } catch (e) {
-            /* no-op */
-          }
-          resetViewportScroll();
-          fixInProgress = false;
-          if (onDone) onDone();
-        };
-
-        // キーボードのアニメーション完了を待つため、visualViewportの
-        // リサイズを検知できればそれを使い、できなければタイムアウトで
-        // フォールバックする
-        let settled = false;
-        const onViewportResize = () => {
-          if (settled) return;
-          settled = true;
-          window.setTimeout(finish, 250);
-        };
-        if (window.visualViewport) {
-          window.visualViewport.addEventListener('resize', onViewportResize, {
-            once: true,
-          });
-        }
-        window.setTimeout(() => {
-          if (!settled) {
-            settled = true;
-            finish();
-          }
-        }, 500);
-      };
-
       installTouchWorkaround();
       resetViewportScroll();
-
-      // Flutterのcanvasに依存しない、プレーンHTMLの「位置調整」ボタンを
-      // 常駐表示する。Flutter側のタップ判定ズレの影響を受けないため、
-      // 常に確実にタップできる。
-      const ensureFixButton = () => {
-        let btn = document.getElementById('ios-pwa-fix-button');
-        if (btn) return btn;
-        btn = document.createElement('button');
-        btn.id = 'ios-pwa-fix-button';
-        btn.type = 'button';
-        btn.textContent = '表示位置を調整';
-        btn.addEventListener(
-          'click',
-          (event) => {
-            event.preventDefault();
-            runRealKeyboardCycle(() => {
-              showToast();
-            });
-          },
-          { passive: false }
-        );
-        document.body.appendChild(btn);
-        return btn;
-      };
-
-      const showFixButton = () => {
-        const btn = ensureFixButton();
-        btn.style.display = 'flex';
-      };
-
-      // ページ読み込み後に一度だけボタンを表示する。このボタン自体は
-      // Flutterの影響を受けないため、いつタップしても確実に機能する。
-      runWhenBodyReady(showFixButton);
 
       try {
         window.addEventListener('pageshow', resetViewportScroll);
