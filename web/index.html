@@ -158,25 +158,67 @@
 
       const resetViewportScroll = () => {
         requestAnimationFrame(() => {
-          window.scrollTo(0, 0);
-          document.documentElement.scrollTop = 0;
-          document.body.scrollTop = 0;
+          try {
+            window.scrollTo(0, 0);
+            if (document.documentElement) {
+              document.documentElement.scrollTop = 0;
+            }
+            if (document.body) {
+              document.body.scrollTop = 0;
+            }
+          } catch (e) {
+            /* no-op */
+          }
         });
+      };
+
+      // document.body に依存する処理は、body が確実に存在するタイミング
+      // (DOMContentLoaded後、または既に読み込み済みならすぐ)で実行する。
+      // <head>内でこのスクリプトが実行される時点では document.body は
+      // まだ null であり、ここで直接 document.body.xxx を呼ぶと
+      // TypeError が発生しIIFE全体が停止してしまうため注意。
+      const runWhenBodyReady = (fn) => {
+        if (document.body) {
+          try {
+            fn();
+          } catch (e) {
+            /* no-op: 個別の初期化失敗が他の初期化を止めないようにする */
+          }
+          return;
+        }
+        document.addEventListener(
+          'DOMContentLoaded',
+          () => {
+            try {
+              fn();
+            } catch (e) {
+              /* no-op */
+            }
+          },
+          { once: true }
+        );
       };
 
       const installTouchWorkaround = () => {
         const noop = () => {};
-        window.addEventListener('touchstart', noop, {
-          capture: true,
-          passive: true,
-        });
-        document.addEventListener('touchstart', noop, {
-          capture: true,
-          passive: true,
-        });
-        document.body.addEventListener('touchstart', noop, {
-          capture: true,
-          passive: true,
+        try {
+          window.addEventListener('touchstart', noop, {
+            capture: true,
+            passive: true,
+          });
+          document.addEventListener('touchstart', noop, {
+            capture: true,
+            passive: true,
+          });
+        } catch (e) {
+          /* no-op */
+        }
+        // document.body が必要な部分だけ遅延実行する
+        runWhenBodyReady(() => {
+          document.body.addEventListener('touchstart', noop, {
+            capture: true,
+            passive: true,
+          });
         });
       };
 
@@ -301,23 +343,23 @@
 
       // ページ読み込み後に一度だけボタンを表示する。このボタン自体は
       // Flutterの影響を受けないため、いつタップしても確実に機能する。
-      if (document.body) {
-        showFixButton();
-      } else {
-        document.addEventListener('DOMContentLoaded', showFixButton);
-      }
+      runWhenBodyReady(showFixButton);
 
-      window.addEventListener('pageshow', resetViewportScroll);
-      window.addEventListener('resize', resetViewportScroll);
-      window.addEventListener('orientationchange', resetViewportScroll);
-      document.addEventListener('visibilitychange', () => {
-        if (!document.hidden) {
-          resetViewportScroll();
+      try {
+        window.addEventListener('pageshow', resetViewportScroll);
+        window.addEventListener('resize', resetViewportScroll);
+        window.addEventListener('orientationchange', resetViewportScroll);
+        document.addEventListener('visibilitychange', () => {
+          if (!document.hidden) {
+            resetViewportScroll();
+          }
+        });
+
+        if (window.visualViewport) {
+          window.visualViewport.addEventListener('resize', resetViewportScroll);
         }
-      });
-
-      if (window.visualViewport) {
-        window.visualViewport.addEventListener('resize', resetViewportScroll);
+      } catch (e) {
+        /* no-op */
       }
     })();
   </script>
