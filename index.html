@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder for base href that will be replaced by the value of
+    the `--base-href` argument provided to `flutter build`.
+  -->
+  <base href="/workout-calendar-app/">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="毎日の宅トレを記録できるカレンダーアプリ">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="宅トレカレンダー">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>宅トレカレンダー</title>
+  <link rel="manifest" href="manifest.json">
+
+  <style>
+    /*
+      iOSの「ホーム画面に追加」(スタンドアロンPWA)モードで発生する
+      タッチ判定ズレ・オーバースクロール干渉を防ぐための調整。
+    */
+    html, body {
+      height: 100%;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      position: fixed;
+      /* iOSのゴムのようなバウンススクロールを無効化 */
+      overscroll-behavior: none;
+      -webkit-overflow-scrolling: auto;
+      touch-action: manipulation;
+    }
+
+    #flutter_target, flutter-view, flt-glass-pane {
+      height: 100%;
+      width: 100%;
+    }
+  </style>
+
+  <script>
+    /*
+      iOS「ホーム画面に追加」(スタンドアロンPWA)モード限定の既知のFlutter/WebKit不具合対策。
+      参考: https://github.com/flutter/flutter/issues/115829
+            https://github.com/flutter/flutter/issues/111896
+
+      現象: 起動直後、Flutter Web側のタップ判定位置が実際の表示位置より
+      上にズレることがある。
+
+      対策: ページ読み込み時・表示復帰時にスクロール位置を強制的に
+      (0, 0)へリセットし、タッチイベントを一度フックしておくことで
+      iOS/WebKit側のビューポート計算のズレを軽減する。画面上に見える
+      UIは表示しない(バックグラウンドで自動的に動作する)。
+    */
+    (function () {
+      const isIos =
+        /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      const isStandalone =
+        window.navigator.standalone === true ||
+        window.matchMedia('(display-mode: standalone)').matches;
+
+      if (!isIos || !isStandalone) {
+        return;
+      }
+
+      const resetViewportScroll = () => {
+        requestAnimationFrame(() => {
+          try {
+            window.scrollTo(0, 0);
+            if (document.documentElement) {
+              document.documentElement.scrollTop = 0;
+            }
+            if (document.body) {
+              document.body.scrollTop = 0;
+            }
+          } catch (e) {
+            /* no-op */
+          }
+        });
+      };
+
+      // document.body に依存する処理は、body が確実に存在するタイミング
+      // (DOMContentLoaded後、または既に読み込み済みならすぐ)で実行する。
+      // <head>内でこのスクリプトが実行される時点では document.body は
+      // まだ null であり、ここで直接 document.body.xxx を呼ぶと
+      // TypeError が発生しIIFE全体が停止してしまうため注意。
+      const runWhenBodyReady = (fn) => {
+        if (document.body) {
+          try {
+            fn();
+          } catch (e) {
+            /* no-op: 個別の初期化失敗が他の初期化を止めないようにする */
+          }
+          return;
+        }
+        document.addEventListener(
+          'DOMContentLoaded',
+          () => {
+            try {
+              fn();
+            } catch (e) {
+              /* no-op */
+            }
+          },
+          { once: true }
+        );
+      };
+
+      const installTouchWorkaround = () => {
+        const noop = () => {};
+        try {
+          window.addEventListener('touchstart', noop, {
+            capture: true,
+            passive: true,
+          });
+          document.addEventListener('touchstart', noop, {
+            capture: true,
+            passive: true,
+          });
+        } catch (e) {
+          /* no-op */
+        }
+        // document.body が必要な部分だけ遅延実行する
+        runWhenBodyReady(() => {
+          document.body.addEventListener('touchstart', noop, {
+            capture: true,
+            passive: true,
+          });
+        });
+      };
+
+      installTouchWorkaround();
+      resetViewportScroll();
+
+      try {
+        window.addEventListener('pageshow', resetViewportScroll);
+        window.addEventListener('resize', resetViewportScroll);
+        window.addEventListener('orientationchange', resetViewportScroll);
+        document.addEventListener('visibilitychange', () => {
+          if (!document.hidden) {
+            resetViewportScroll();
+          }
+        });
+
+        if (window.visualViewport) {
+          window.visualViewport.addEventListener('resize', resetViewportScroll);
+        }
+      } catch (e) {
+        /* no-op */
+      }
+    })();
+  </script>
+</head>
+<body>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>
