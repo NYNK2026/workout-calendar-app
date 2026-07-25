@@ -22,62 +22,70 @@ class _CalendarScreenState extends State<CalendarScreen> {
   DateTime _focusedDay = DateTime.now();
   DateTime _selectedDay = DateTime.now();
 
+  bool _isFixingViewport = false;
+
   @override
   void initState() {
     super.initState();
     // iOSの「ホーム画面に追加」(スタンドアロンPWA)モードでは、起動直後
     // タップ判定位置が実際の表示位置より上にズレる既知の不具合がある
     // (Flutter Issue #115829 / #111896 と同系統の現象)。
-    // 記録シート(モーダルボトムシート)を1回開いて閉じると直ることが
-    // 判明したため、起動直後に見えない形で同じ開閉操作を自動実行し、
-    // 最初から正しいタップ判定位置になるようにする。
+    // 「記録シート(実際のTextFieldを含む編集画面)を一度表示する」だけで
+    // 直ることが判明したため(保存操作やTextField自体への入力は不要)、
+    // 起動直後に見えない形で本物の編集シートを自動的に一瞬表示してから
+    // 閉じることで、最初から正しいタップ判定位置になるようにする。
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _warmUpViewportLayout();
+      _triggerViewportFix(silent: true);
+      // 1回だけでは直らない場合に備え、少し間を置いてもう一度実行する
+      Future.delayed(const Duration(milliseconds: 900), () {
+        if (mounted) _triggerViewportFix(silent: true);
+      });
     });
   }
 
-  Future<void> _warmUpViewportLayout() async {
-    if (!mounted) return;
+  /// 実際の記録編集シート(本物のTextFieldを含む)を一瞬表示してから
+  /// 自動的に閉じることで、iOS PWAのビューポート計算ズレを解消する。
+  /// [silent] が true の場合、画面には何も表示せず(不透明度0・タップ
+  /// 無効)、ユーザーには見えない形で実行する。「タップ位置調整」ボタン
+  /// から手動実行する場合も、ユーザー体験を損なわないためsilentのまま
+  /// 実行し、完了後にスナックバーで結果を伝える。
+  Future<void> _triggerViewportFix({required bool silent}) async {
+    if (!mounted || _isFixingViewport) return;
+    _isFixingViewport = true;
 
-    // showModalBottomSheetのFutureはシートが閉じるまで完了しないため、
-    // ここでは待ち受けず、別タイミングで自動的に閉じる
     final sheetFuture = showModalBottomSheet<void>(
       context: context,
       isDismissible: false,
       enableDrag: false,
+      isScrollControlled: true,
       backgroundColor: Colors.transparent,
       barrierColor: Colors.transparent,
-      builder: (_) => const SizedBox.shrink(),
+      builder: (_) => IgnorePointer(
+        child: Opacity(
+          opacity: 0.0,
+          child: RecordEditSheet(date: _selectedDay),
+        ),
+      ),
     );
 
-    // 開いた直後、少し待ってから自動的に閉じる
-    await Future.delayed(const Duration(milliseconds: 150));
+    await Future.delayed(const Duration(milliseconds: 220));
     FocusManager.instance.primaryFocus?.unfocus();
     if (mounted && Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
     }
-
-    // 念のためシートのFutureも待機(エラーは無視)
     unawaited(sheetFuture.catchError((_) {}));
 
-    // 1回だけでは直らない場合に備え、少し間を置いてもう一度実行する
-    if (!mounted) return;
-    await Future.delayed(const Duration(milliseconds: 300));
-    if (!mounted) return;
-    final secondSheetFuture = showModalBottomSheet<void>(
-      context: context,
-      isDismissible: false,
-      enableDrag: false,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.transparent,
-      builder: (_) => const SizedBox.shrink(),
-    );
-    await Future.delayed(const Duration(milliseconds: 150));
-    FocusManager.instance.primaryFocus?.unfocus();
-    if (mounted && Navigator.of(context).canPop()) {
-      Navigator.of(context).pop();
+    await Future.delayed(const Duration(milliseconds: 80));
+    _isFixingViewport = false;
+
+    if (!silent && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('表示位置を調整しました'),
+          duration: Duration(seconds: 2),
+        ),
+      );
     }
-    unawaited(secondSheetFuture.catchError((_) {}));
   }
 
   @override
@@ -97,6 +105,15 @@ class _CalendarScreenState extends State<CalendarScreen> {
       appBar: AppBar(
         title: const Text('宅トレカレンダー'),
         actions: [
+          // iOSホーム画面追加(PWA)モードで、起動直後にタップ位置が
+          // 上にズレてしまう既知の不具合の手動リカバリー用ボタン。
+          // 通常は起動時の自動処理で解消されるが、念のための保険として
+          // ユーザー自身でも位置調整できるようにしている。
+          IconButton(
+            icon: const Icon(Icons.center_focus_strong_outlined),
+            tooltip: 'タップ位置調整',
+            onPressed: () => _triggerViewportFix(silent: false),
+          ),
           IconButton(
             icon: const Icon(Icons.bar_chart_outlined),
             onPressed: () {
