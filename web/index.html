@@ -58,28 +58,91 @@
     }
   </style>
 
+  <style>
+    /*
+      Flutterの描画領域(タップ判定がズレる可能性がある領域)の外側、
+      プレーンなHTML/CSSレイヤーとして常駐する「位置調整」ボタン。
+      Flutterのcanvasに依存しないため、Flutter側のタップ判定ズレの
+      影響を受けず、常に確実にタップできる。
+    */
+    #ios-pwa-fix-button {
+      position: fixed;
+      right: 14px;
+      bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+      z-index: 2147483647;
+      display: none;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 16px;
+      border: none;
+      border-radius: 999px;
+      background: #4ECDC4;
+      color: #ffffff;
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+    #ios-pwa-fix-button:active {
+      background: #3fb6ae;
+    }
+    #ios-pwa-fix-toast {
+      position: fixed;
+      left: 50%;
+      bottom: calc(74px + env(safe-area-inset-bottom, 0px));
+      transform: translateX(-50%);
+      z-index: 2147483647;
+      display: none;
+      padding: 8px 16px;
+      border-radius: 999px;
+      background: rgba(30, 30, 30, 0.85);
+      color: #ffffff;
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    #ios-pwa-fix-input {
+      position: fixed;
+      /* 画面内(表示範囲内)に置く。iOSは完全に画面外や極端に小さい要素
+         へのfocus()ではキーボードを表示しないことがあるため、実際に
+         視認できる程度のサイズ・位置に配置する */
+      left: 50%;
+      bottom: 70px;
+      transform: translateX(-50%);
+      width: 10px;
+      height: 36px;
+      opacity: 0.01;
+      border: none;
+      padding: 0;
+      font-size: 16px;
+      z-index: 2147483646;
+    }
+  </style>
+
   <script>
     /*
       iOS「ホーム画面に追加」(スタンドアロンPWA)モード限定の既知のFlutter/WebKit不具合対策。
       参考: https://github.com/flutter/flutter/issues/115829
             https://github.com/flutter/flutter/issues/111896
 
-      現象: TextFieldにフォーカス→フォーカスアウトした後、iOS側が「見えないキーボード」の
-      分だけビューポート高さを内部的に確保し続けてしまい、画面下部の要素(FloatingActionButton や
-      リンクなど)がタップ判定を受け付けなくなる。この不具合はiOS PWA(ホーム画面追加後の
-      スタンドアロン起動)でのみ発生し、Safari/Chromeのブラウザタブ表示やAndroidでは発生しない。
+      現象: 起動直後、Flutter Web側のタップ判定位置が実際の表示位置より
+      上にズレてしまう。これは「見えないダミー要素へのfocus()」や
+      「合成のresizeイベント」、「TextFieldを含むが実際にはフォーカス
+      されていないシートの表示」では解消できないことを実機検証で確認済み。
 
-      また、起動直後は逆に「タップ判定位置が実際の表示位置より上にズレる」という
-      症状で現れることも確認している。これは合成のresizeイベント発火だけでは直らず、
-      「本物のフォーカス→ブラーのサイクル」(=キーボード表示/非表示に伴うWebKit内部の
-      ビューポート再計算)を一度経由することで解消される(記録シート内のTextFieldを
-      操作すると直っていたのはこのため)。
+      実際に解消するのは、ユーザーが「実在する入力欄に本物のタップで
+      フォーカス→ソフトキーボードを実際に開閉する」という操作のみ
+      (記録シートの数値欄をタップしてから✓で閉じると直る)。
 
-      対策:
-      1. passiveなtouchstartリスナーを登録して不要なジェスチャー競合を減らす
-      2. 画面外に見えないダミーのinput要素を用意し、起動直後・最初のタップ操作時に
-         実際にfocus()→blur()させることで、本物のフォーカス/ブラーサイクルを
-         人工的に発生させ、WebKit側のビューポート計算を正しい状態にリセットする
+      対策: Flutterのcanvas(タップ判定がズレる領域)の外側、プレーンな
+      HTML要素として「位置調整」ボタンを常駐させる。このボタンは
+      Flutterの影響を受けないため常に正しい位置でタップできる。
+      ボタンタップ(=本物のユーザージェスチャー)をトリガーとして、
+      画面内に実在する小さな入力欄に同期的にfocus()し、実際にソフト
+      キーボードを開かせ、その後blur()して閉じることで、ユーザーが
+      手動操作で発見した「効果のある操作」を確実に再現する。
     */
     (function () {
       const isIos =
@@ -117,105 +180,139 @@
         });
       };
 
-      // 画面外に配置する、見た目に影響しないダミーのinput要素を作成する。
-      // これに実際にfocus/blurさせることで、iOSの「本物の」キーボード
-      // 表示/非表示サイクルを経由させ、ビューポート計算のズレを解消する。
-      let dummyInput = null;
-      const getDummyInput = () => {
-        if (dummyInput) return dummyInput;
-        dummyInput = document.createElement('input');
-        dummyInput.setAttribute('type', 'text');
-        dummyInput.setAttribute('aria-hidden', 'true');
-        dummyInput.setAttribute('tabindex', '-1');
-        dummyInput.style.position = 'fixed';
-        dummyInput.style.top = '-1000px';
-        dummyInput.style.left = '0';
-        dummyInput.style.width = '1px';
-        dummyInput.style.height = '1px';
-        dummyInput.style.opacity = '0';
-        dummyInput.style.border = 'none';
-        dummyInput.style.padding = '0';
-        // iOSが自動ズームしないよう16px以上を指定
-        dummyInput.style.fontSize = '16px';
-        dummyInput.style.pointerEvents = 'none';
-        document.body.appendChild(dummyInput);
-        return dummyInput;
+      let fixInput = null;
+      const getFixInput = () => {
+        if (fixInput) return fixInput;
+        fixInput = document.createElement('input');
+        fixInput.id = 'ios-pwa-fix-input';
+        fixInput.setAttribute('type', 'text');
+        fixInput.setAttribute('inputmode', 'numeric');
+        fixInput.setAttribute('aria-hidden', 'true');
+        fixInput.setAttribute('autocomplete', 'off');
+        fixInput.setAttribute('autocorrect', 'off');
+        fixInput.setAttribute('autocapitalize', 'off');
+        fixInput.setAttribute('spellcheck', 'false');
+        document.body.appendChild(fixInput);
+        return fixInput;
       };
 
-      // フォーカスアウト後、iOSが「見えないキーボード」状態を握り続けている場合に
-      // activeElementのフォーカスを明示的に外し、ビューポートのズレをリセットする
-      const forceBlurAndReset = () => {
-        const active = document.activeElement;
-        if (
-          active &&
-          active !== document.body &&
-          typeof active.blur === 'function'
-        ) {
-          active.blur();
-        }
-        resetViewportScroll();
+      let toastEl = null;
+      const getToast = () => {
+        if (toastEl) return toastEl;
+        toastEl = document.createElement('div');
+        toastEl.id = 'ios-pwa-fix-toast';
+        toastEl.textContent = '表示位置を調整しました';
+        document.body.appendChild(toastEl);
+        return toastEl;
+      };
+      const showToast = () => {
+        const toast = getToast();
+        toast.style.display = 'block';
+        window.setTimeout(() => {
+          toast.style.display = 'none';
+        }, 1800);
       };
 
-      let cycleInProgress = false;
-      // 本物のフォーカス→ブラーサイクルを人工的に発生させ、WebKitの
-      // ビューポート計算を正しい状態に強制リセットする
-      const runFocusBlurCycle = (callback) => {
-        if (cycleInProgress) {
-          if (callback) callback();
+      let fixInProgress = false;
+      // 本物のユーザージェスチャー(ボタンタップ)を起点に、実在する
+      // 入力欄へ同期的にfocus()してソフトキーボードを実際に開かせ、
+      // 少し待ってからblur()で閉じる。これにより、iOS/WebKit側の
+      // ビューポート計算が正しくリセットされ、タップ判定ズレが解消する。
+      const runRealKeyboardCycle = (onDone) => {
+        if (fixInProgress) {
+          if (onDone) onDone();
           return;
         }
-        cycleInProgress = true;
+        fixInProgress = true;
+        const input = getFixInput();
         try {
-          const input = getDummyInput();
+          input.value = '';
+          // ボタンのclickハンドラ内(=本物のユーザージェスチャー内)で
+          // 同期的に呼ぶことで、iOSがソフトキーボードを実際に表示する
           input.focus({ preventScroll: true });
-          window.setTimeout(() => {
-            input.blur();
-            resetViewportScroll();
-            cycleInProgress = false;
-            if (callback) callback();
-          }, 60);
         } catch (e) {
-          cycleInProgress = false;
-          if (callback) callback();
+          /* no-op */
         }
+
+        const finish = () => {
+          try {
+            input.blur();
+          } catch (e) {
+            /* no-op */
+          }
+          resetViewportScroll();
+          fixInProgress = false;
+          if (onDone) onDone();
+        };
+
+        // キーボードのアニメーション完了を待つため、visualViewportの
+        // リサイズを検知できればそれを使い、できなければタイムアウトで
+        // フォールバックする
+        let settled = false;
+        const onViewportResize = () => {
+          if (settled) return;
+          settled = true;
+          window.setTimeout(finish, 250);
+        };
+        if (window.visualViewport) {
+          window.visualViewport.addEventListener('resize', onViewportResize, {
+            once: true,
+          });
+        }
+        window.setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            finish();
+          }
+        }, 500);
       };
 
       installTouchWorkaround();
       resetViewportScroll();
 
-      // 起動直後、複数のタイミングでフォーカス/ブラーサイクルを実行し、
-      // Flutter側のレイアウト確定タイミングのズレを吸収する
-      [50, 300, 700, 1200, 2000].forEach((delay) => {
-        window.setTimeout(() => runFocusBlurCycle(), delay);
-      });
+      // Flutterのcanvasに依存しない、プレーンHTMLの「位置調整」ボタンを
+      // 常駐表示する。Flutter側のタップ判定ズレの影響を受けないため、
+      // 常に確実にタップできる。
+      const ensureFixButton = () => {
+        let btn = document.getElementById('ios-pwa-fix-button');
+        if (btn) return btn;
+        btn = document.createElement('button');
+        btn.id = 'ios-pwa-fix-button';
+        btn.type = 'button';
+        btn.textContent = '表示位置を調整';
+        btn.addEventListener(
+          'click',
+          (event) => {
+            event.preventDefault();
+            runRealKeyboardCycle(() => {
+              showToast();
+            });
+          },
+          { passive: false }
+        );
+        document.body.appendChild(btn);
+        return btn;
+      };
 
-      // Flutter Webが初回フレームを描画したタイミングでも実行する
-      window.addEventListener('flutter-first-frame', () => {
-        runFocusBlurCycle();
-        window.setTimeout(() => runFocusBlurCycle(), 400);
-      });
+      const showFixButton = () => {
+        const btn = ensureFixButton();
+        btn.style.display = 'flex';
+      };
 
-      // ユーザーが最初に画面をタップした瞬間にも一度だけ実行する
-      // (実際のユーザー操作を伴うことで、iOS側の制約下でも確実に
-      //  フォーカスサイクルが機能するようにするフォールバック)
-      let firstTouchHandled = false;
-      document.addEventListener(
-        'touchstart',
-        () => {
-          if (firstTouchHandled) return;
-          firstTouchHandled = true;
-          runFocusBlurCycle();
-        },
-        { capture: true, passive: true }
-      );
+      // ページ読み込み後に一度だけボタンを表示する。このボタン自体は
+      // Flutterの影響を受けないため、いつタップしても確実に機能する。
+      if (document.body) {
+        showFixButton();
+      } else {
+        document.addEventListener('DOMContentLoaded', showFixButton);
+      }
 
-      window.addEventListener('pageshow', () => runFocusBlurCycle());
+      window.addEventListener('pageshow', resetViewportScroll);
       window.addEventListener('resize', resetViewportScroll);
-      window.addEventListener('orientationchange', () => runFocusBlurCycle());
-      window.addEventListener('focusout', forceBlurAndReset, true);
+      window.addEventListener('orientationchange', resetViewportScroll);
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden) {
-          runFocusBlurCycle();
+          resetViewportScroll();
         }
       });
 
