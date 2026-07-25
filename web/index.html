@@ -124,16 +124,52 @@
         });
       };
 
+      // 起動直後、Flutterエンジンがまだセーフエリア/ビューポートの
+      // 確定前のサイズを読み取ってしまい、タップ判定位置が実際の表示位置
+      // より上にズレたまま固定されてしまう現象への対策。
+      // 「resize」イベントを強制的に発火させることで、Flutterのウェブ
+      // エンジンに画面サイズを再計算させ、ズレを解消する。
+      // (モーダルシートを開いて閉じると直る、という現象はこの再計算が
+      //  副作用として発生していたことによるものと考えられる)
+      const forceEngineResize = () => {
+        resetViewportScroll();
+        try {
+          window.dispatchEvent(new Event('resize'));
+        } catch (e) {
+          /* no-op */
+        }
+        if (window.visualViewport) {
+          try {
+            window.visualViewport.dispatchEvent(new Event('resize'));
+          } catch (e) {
+            /* no-op */
+          }
+        }
+      };
+
       installTouchWorkaround();
       resetViewportScroll();
 
-      window.addEventListener('pageshow', resetViewportScroll);
+      // 起動直後は複数回にわたって強制的にリサイズ処理をかけ、
+      // Flutter側のレイアウト確定タイミングのズレを吸収する
+      [0, 150, 350, 600, 1000, 1600, 2400].forEach((delay) => {
+        window.setTimeout(forceEngineResize, delay);
+      });
+
+      // Flutter Webが初回フレームを描画したタイミングでも実行する
+      window.addEventListener('flutter-first-frame', () => {
+        forceEngineResize();
+        window.setTimeout(forceEngineResize, 300);
+        window.setTimeout(forceEngineResize, 800);
+      });
+
+      window.addEventListener('pageshow', forceEngineResize);
       window.addEventListener('resize', resetViewportScroll);
-      window.addEventListener('orientationchange', resetViewportScroll);
+      window.addEventListener('orientationchange', forceEngineResize);
       window.addEventListener('focusout', forceBlurAndReset, true);
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden) {
-          resetViewportScroll();
+          forceEngineResize();
         }
       });
 
