@@ -67,7 +67,8 @@
     */
     #ios-pwa-fix-button {
       position: fixed;
-      right: 14px;
+      /* 右下はFlutter側の「+」FABと重なるため、左下に配置する */
+      left: 14px;
       bottom: calc(14px + env(safe-area-inset-bottom, 0px));
       z-index: 2147483647;
       display: none;
