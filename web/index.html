@@ -57,6 +57,91 @@
       width: 100%;
     }
   </style>
+
+  <script>
+    /*
+      iOS「ホーム画面に追加」(スタンドアロンPWA)モード限定の既知のFlutter/WebKit不具合対策。
+      参考: https://github.com/flutter/flutter/issues/115829
+            https://github.com/flutter/flutter/issues/111896
+
+      現象: TextFieldにフォーカス→フォーカスアウトした後、iOS側が「見えないキーボード」の
+      分だけビューポート高さを内部的に確保し続けてしまい、画面下部の要素(FloatingActionButton や
+      リンクなど)がタップ判定を受け付けなくなる。この不具合はiOS PWA(ホーム画面追加後の
+      スタンドアロン起動)でのみ発生し、Safari/Chromeのブラウザタブ表示やAndroidでは発生しない。
+
+      対策: passiveなtouchstartリスナーを登録して不要なジェスチャー競合を減らし、
+      フォーカスアウト・画面表示復帰・リサイズ等のタイミングで
+      document/visualViewportのスクロール位置を強制的にリセットすることで、
+      iOSが誤って保持しているビューポートのズレを解消する。
+    */
+    (function () {
+      const isIos =
+        /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      const isStandalone =
+        window.navigator.standalone === true ||
+        window.matchMedia('(display-mode: standalone)').matches;
+
+      if (!isIos || !isStandalone) {
+        return;
+      }
+
+      const resetViewportScroll = () => {
+        requestAnimationFrame(() => {
+          window.scrollTo(0, 0);
+          document.documentElement.scrollTop = 0;
+          document.body.scrollTop = 0;
+        });
+      };
+
+      // フォーカスアウト後、iOSが「見えないキーボード」状態を握り続けている場合に
+      // activeElementのフォーカスを明示的に外し、ビューポートのズレをリセットする
+      const forceBlurAndReset = () => {
+        const active = document.activeElement;
+        if (
+          active &&
+          active !== document.body &&
+          typeof active.blur === 'function'
+        ) {
+          active.blur();
+        }
+        resetViewportScroll();
+      };
+
+      const installTouchWorkaround = () => {
+        const noop = () => {};
+        window.addEventListener('touchstart', noop, {
+          capture: true,
+          passive: true,
+        });
+        document.addEventListener('touchstart', noop, {
+          capture: true,
+          passive: true,
+        });
+        document.body.addEventListener('touchstart', noop, {
+          capture: true,
+          passive: true,
+        });
+      };
+
+      installTouchWorkaround();
+      resetViewportScroll();
+
+      window.addEventListener('pageshow', resetViewportScroll);
+      window.addEventListener('resize', resetViewportScroll);
+      window.addEventListener('orientationchange', resetViewportScroll);
+      window.addEventListener('focusout', forceBlurAndReset, true);
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+          resetViewportScroll();
+        }
+      });
+
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', resetViewportScroll);
+      }
+    })();
+  </script>
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>

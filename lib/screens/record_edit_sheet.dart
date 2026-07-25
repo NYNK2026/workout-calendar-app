@@ -10,13 +10,23 @@ class RecordEditSheet extends StatefulWidget {
 
   const RecordEditSheet({super.key, required this.date});
 
-  static Future<void> show(BuildContext context, DateTime date) {
-    return showModalBottomSheet(
+  static Future<void> show(BuildContext context, DateTime date) async {
+    await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => RecordEditSheet(date: date),
     );
+    // iOSの「ホーム画面に追加」(PWA)モードでは、シート内のTextFieldに
+    // フォーカスが当たった状態のままシートを閉じると、iOS側が「見えない
+    // キーボード」の分だけビューポートを確保し続け、画面下部のボタンや
+    // リンクがタップに反応しなくなる既知の不具合がある
+    // (https://github.com/flutter/flutter/issues/115829,
+    //  https://github.com/flutter/flutter/issues/111896)。
+    // シートを閉じた直後に明示的にフォーカスを外し、この不具合を回避する。
+    if (context.mounted) {
+      FocusManager.instance.primaryFocus?.unfocus();
+    }
   }
 
   @override
@@ -100,6 +110,8 @@ class _RecordEditSheetState extends State<RecordEditSheet> {
       weightKg: _parseDouble(_weightController.text),
       bodyFatPercent: _parseDouble(_bodyFatController.text),
     );
+    // 閉じる前にフォーカスを外す(iOS PWAのタッチ判定不具合対策)
+    FocusManager.instance.primaryFocus?.unfocus();
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -124,6 +136,7 @@ class _RecordEditSheetState extends State<RecordEditSheet> {
     );
     if (confirmed == true) {
       await provider.deleteRecord(widget.date);
+      FocusManager.instance.primaryFocus?.unfocus();
       if (mounted) Navigator.of(context).pop();
     }
   }
