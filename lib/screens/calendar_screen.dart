@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -19,6 +21,64 @@ class CalendarScreen extends StatefulWidget {
 class _CalendarScreenState extends State<CalendarScreen> {
   DateTime _focusedDay = DateTime.now();
   DateTime _selectedDay = DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+    // iOSの「ホーム画面に追加」(スタンドアロンPWA)モードでは、起動直後
+    // タップ判定位置が実際の表示位置より上にズレる既知の不具合がある
+    // (Flutter Issue #115829 / #111896 と同系統の現象)。
+    // 記録シート(モーダルボトムシート)を1回開いて閉じると直ることが
+    // 判明したため、起動直後に見えない形で同じ開閉操作を自動実行し、
+    // 最初から正しいタップ判定位置になるようにする。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _warmUpViewportLayout();
+    });
+  }
+
+  Future<void> _warmUpViewportLayout() async {
+    if (!mounted) return;
+
+    // showModalBottomSheetのFutureはシートが閉じるまで完了しないため、
+    // ここでは待ち受けず、別タイミングで自動的に閉じる
+    final sheetFuture = showModalBottomSheet<void>(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.transparent,
+      builder: (_) => const SizedBox.shrink(),
+    );
+
+    // 開いた直後、少し待ってから自動的に閉じる
+    await Future.delayed(const Duration(milliseconds: 150));
+    FocusManager.instance.primaryFocus?.unfocus();
+    if (mounted && Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
+
+    // 念のためシートのFutureも待機(エラーは無視)
+    unawaited(sheetFuture.catchError((_) {}));
+
+    // 1回だけでは直らない場合に備え、少し間を置いてもう一度実行する
+    if (!mounted) return;
+    await Future.delayed(const Duration(milliseconds: 300));
+    if (!mounted) return;
+    final secondSheetFuture = showModalBottomSheet<void>(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.transparent,
+      builder: (_) => const SizedBox.shrink(),
+    );
+    await Future.delayed(const Duration(milliseconds: 150));
+    FocusManager.instance.primaryFocus?.unfocus();
+    if (mounted && Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
+    unawaited(secondSheetFuture.catchError((_) {}));
+  }
 
   @override
   Widget build(BuildContext context) {
