@@ -33,6 +33,30 @@
 
   <title>宅トレカレンダー</title>
   <link rel="manifest" href="manifest.json">
+
+  <style>
+    /*
+      iOSの「ホーム画面に追加」(スタンドアロンPWA)モードで発生する
+      タッチ判定ズレ・オーバースクロール干渉を防ぐための調整。
+    */
+    html, body {
+      height: 100%;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      position: fixed;
+      /* iOSのゴムのようなバウンススクロールを無効化 */
+      overscroll-behavior: none;
+      -webkit-overflow-scrolling: auto;
+      touch-action: manipulation;
+    }
+
+    #flutter_target, flutter-view, flt-glass-pane {
+      height: 100%;
+      width: 100%;
+    }
+  </style>
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>

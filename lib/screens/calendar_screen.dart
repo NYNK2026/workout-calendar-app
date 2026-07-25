@@ -62,10 +62,15 @@ class _CalendarScreenState extends State<CalendarScreen> {
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: AppColors.mint,
-        onPressed: () => RecordEditSheet.show(context, _selectedDay),
-        child: const Icon(Icons.add, color: Colors.white),
+      floatingActionButton: Padding(
+        // iOSのホーム画面追加(PWA)時、画面下端はシステムジェスチャー領域と
+        // 干渉してタップが反応しにくくなるため、十分な余白を確保する
+        padding: const EdgeInsets.only(bottom: 12),
+        child: FloatingActionButton(
+          backgroundColor: AppColors.mint,
+          onPressed: () => RecordEditSheet.show(context, _selectedDay),
+          child: const Icon(Icons.add, color: Colors.white),
+        ),
       ),
     );
   }
